@@ -19,23 +19,9 @@
 #ifndef UIM_H
 #define UIM_H
 
-#define N_TI_WL 22
-
-#if defined(BOTHER)
-#define USING_UAPI
-#endif
-
 /* Paramaters to set the baud rate*/
 #define  FLOW_CTL       0x0001
-#ifndef USING_UAPI
-#define  BOTHER         0x00001000
-#endif
 #define  ARM_NCCS       19
-
-#ifndef USING_UAPI
-#define TCGETS2      _IOR('T',0x2A, struct termios2)
-#define TCSETS2      _IOW('T',0x2B, struct termios2)
-#endif
 
 /*HCI Command and Event information*/
 #define HCI_HDR_OPCODE          0xff36
@@ -59,23 +45,8 @@
 #define EVT_CMD_COMPLETE        0x0E
 #define EVT_CMD_STATUS          0x0F
 
-/* use it for string lengths and buffers */
-#define UART_DEV_NAME_LEN	32
-/* BD address length in format xx:xx:xx:xx:xx:xx */
-#define BD_ADDR_LEN		17
 
-/* the sysfs entries with device configuration set by
- * shared transport driver
- */
-#define KIM_SYSFS_BASE		"/sys/devices/platform/kim"
-#define INSTALL_SYSFS_ENTRY	install_sysfs_entry
-#define DEV_NAME_SYSFS		dev_name_sysfs
-#define BAUD_RATE_SYSFS		baud_rate_sysfs
-#define FLOW_CTRL_SYSFS		flow_cntrl_sysfs
-
-
-
-#define VERBOSE
+//#define VERBOSE
 #ifdef ANDROID
 #define LOG_TAG "uim-sysfs"
 #define UIM_ERR(fmt, arg...)  ALOGE("uim:"fmt"\n" , ##arg)
@@ -92,40 +63,7 @@
 #define UIM_DBG(fmt, arg...)
 #define UIM_VER(fmt, arg...)
 #endif
-
-#else
-
-/*Debug logs*/
-#define UIM_ERR(fmt, arg...)  printf("uim:"fmt"\n" , ##arg)
-#if defined(UIM_DEBUG)		/* limited debug messages */
-#define UIM_START_FUNC()      printf("uim: Inside %s", __FUNCTION__)
-#define UIM_DBG(fmt, arg...)  printf("uim:"fmt"\n" , ## arg)
-#define UIM_VER(fmt, arg...)
-#elif defined(VERBOSE)		/* very verbose */
-#define UIM_START_FUNC()      printf("uim: Inside %s", __FUNCTION__)
-#define UIM_DBG(fmt, arg...)  printf("uim:"fmt"\n" , ## arg)
-#define UIM_VER(fmt, arg...)  printf("uim:"fmt"\n" , ## arg)
-#else /* error msgs only */
-#define UIM_START_FUNC()
-#define UIM_DBG(fmt, arg...)
-#define UIM_VER(fmt, arg...)
-#endif
-
 #endif  /* ANDROID */
-
-/*Termios2 structure for setting the Custom baud rate*/
-#ifndef USING_UAPI
-struct termios2 {
-	tcflag_t c_iflag;       /* input mode flags */
-	tcflag_t c_oflag;       /* output mode flags */
-	tcflag_t c_cflag;       /* control mode flags */
-	tcflag_t c_lflag;       /* local mode flags */
-	cc_t c_line;            /* line discipline */
-	cc_t c_cc[ARM_NCCS];    /* control characters */
-	speed_t c_ispeed;       /* input speed */
-	speed_t c_ospeed;       /* output speed */
-};
-#endif
 
 /* HCI command header*/
 typedef struct {
@@ -180,16 +118,11 @@ typedef struct {
 	bdaddr_t addr;
 } __attribute__ ((packed)) uim_bdaddr_change_cmd;
 
-/* Signal received from KIM will install line discipline at first,
-     * the next signal received from KIM will un-install the 
-     * line discipline*/
-    enum {
-    	/* expecting signal from KIM to setup uart fd for ST */
-    	INSTALL_N_SHARED,
-    
-    	/* expecting signal from KIM to close uart fd */
-    	UNINSTALL_N_SHARED,
-    };
+// #define INSTALL_SYSFS_ENTRY	"/sys/devices/platform/kim/install"
+// #define DEV_NAME_SYSFS	"/sys/devices/platform/kim/dev_name"
+// #define BAUD_RATE_SYSFS	"/sys/devices/platform/kim/baud_rate"
+// #define FLOW_CTRL_SYSFS	"/sys/devices/platform/kim/flow_cntrl"
+
 
 /* Functions to insert and remove the kernel modules from the system*/
 extern int init_module(void *, unsigned int, const char *);

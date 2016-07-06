@@ -27,14 +27,14 @@
 #include <stdlib.h>
 #include <sys/stat.h>
 #include <sys/utsname.h>
+#include "uim.h"
+#include <asm-generic/termbits.h>
+#include <asm-generic/ioctls.h>
 #ifdef ANDROID
 #include <private/android_filesystem_config.h>
 #include <cutils/log.h>
 #endif
 
-#include "uim.h"
-
-#define USES_BLUEDROID 
 
 /* Maintains the exit state of UIM*/
 static int exiting;
@@ -43,10 +43,7 @@ static int exiting;
 char uim_bd_address[17];
 bdaddr_t *bd_addr;
 
-static char install_sysfs_entry[48];
-static char dev_name_sysfs[48];
-static char baud_rate_sysfs[48];
-static char flow_cntrl_sysfs[48];
+char sysfs_kim_base[64];
 
 /* File descriptor for the UART device*/
 int dev_fd;
@@ -137,7 +134,6 @@ static int rmmod(const char *modname)
 				modname, strerror(errno));
 	return ret;
 }
-
 #endif /* ANDROID */
 
 /*****************************************************************************/
@@ -362,6 +358,10 @@ int st_uart_config(unsigned char install)
 	unsigned long cust_baud_rate;
 	unsigned int flow_ctrl;
 
+	const char dev_name_sysfs[64];
+	const char baud_rate_sysfs[64];
+	const char flow_ctrl_sysfs[64];
+
 	uim_speed_change_cmd cmd;
 	uim_bdaddr_change_cmd addr_cmd;
 
@@ -370,9 +370,10 @@ int st_uart_config(unsigned char install)
 	if (install == '1') {
 		UIM_DBG("install set to 1");
 		memset(buf, 0, 32);
-		fd = open(DEV_NAME_SYSFS, O_RDONLY);
+		sprintf(dev_name_sysfs, "%s/dev_name", sysfs_kim_base);
+		fd = open(dev_name_sysfs, O_RDONLY);
 		if (fd < 0) {
-			UIM_ERR("Can't open %s", DEV_NAME_SYSFS);
+			UIM_ERR("Can't open %s", dev_name_sysfs);
 			return -1;
 		}
 		len = read(fd, buf, 32);
@@ -385,9 +386,10 @@ int st_uart_config(unsigned char install)
 		close(fd);
 
 		memset(buf, 0, 32);
-		fd = open(BAUD_RATE_SYSFS, O_RDONLY);
+		sprintf(baud_rate_sysfs, "%s/baud_rate", sysfs_kim_base);
+		fd = open(baud_rate_sysfs, O_RDONLY);
 		if (fd < 0) {
-			UIM_ERR("Can't open %s", BAUD_RATE_SYSFS);
+			UIM_ERR("Can't open %s", baud_rate_sysfs);
 			return -1;
 		}
 		len = read(fd, buf, 32);
@@ -400,9 +402,10 @@ int st_uart_config(unsigned char install)
 		sscanf((const char*)buf, "%ld", &cust_baud_rate);
 
 		memset(buf, 0, 32);
-		fd = open(FLOW_CTRL_SYSFS, O_RDONLY);
+		sprintf(flow_ctrl_sysfs, "%s/flow_cntrl", sysfs_kim_base);
+		fd = open(flow_ctrl_sysfs, O_RDONLY);
 		if (fd < 0) {
-			UIM_ERR("Can't open %s", FLOW_CTRL_SYSFS);
+			UIM_ERR("Can't open %s", flow_ctrl_sysfs);
 			close(fd);
 			return -1;
 		}
@@ -510,7 +513,7 @@ int st_uart_config(unsigned char install)
 		/* After the UART speed has been changed, the IOCTL is
 		 * is called to set the line discipline to N_TI_WL
 		 */
-		ldisc = N_TI_WL;
+		ldisc = 22;
 		if (ioctl(dev_fd, TIOCSETD, &ldisc) < 0) {
 			UIM_ERR(" Can't set line discipline");
 			cleanup(-1);
@@ -528,12 +531,13 @@ int st_uart_config(unsigned char install)
 	return 0;
 }
 
-
 int remove_modules()
 {
 	int err = 0;
 
 #ifdef ANDROID
+/* wilink8 does not use these modules. */
+#if 0
 	UIM_VER(" Removing gps_drv ");
 	if (rmmod("gps_drv") != 0) {
 		UIM_ERR(" Error removing gps_drv module");
@@ -559,6 +563,7 @@ int remove_modules()
 		UIM_DBG(" Removed btwilink module");
 	}
 	UIM_DBG(" Removed btwilink module");
+#endif
 
 	/*Remove the Shared Transport */
 	UIM_VER(" Removing st_drv ");
@@ -569,6 +574,16 @@ int remove_modules()
 		UIM_DBG(" Removed st_drv module ");
 	}
 	UIM_DBG(" Removed st_drv module ");
+
+	/*Remove the Shared Transport */
+	UIM_VER(" Removing tty_hci ");
+	if (rmmod("st_drv") != 0) {
+		UIM_ERR(" Error removing tty_hci module");
+		err = -1;
+	} else {
+		UIM_DBG(" Removed tty_hci module ");
+	}
+	UIM_DBG(" Removed tty_hci module ");
 #else
 	UIM_VER(" Removing btwilink ");
 	if (system("rmmod btwilink") != 0) {
@@ -670,8 +685,7 @@ bdaddr_t *strtoba(const char *str)
 /*****************************************************************************/
 int main(int argc, char *argv[])
 {
-	char *temp_path[48];
-	int st_fd, kim_id, err;
+	int st_fd, kobj_id, err;
 	struct stat file_stat;
 #ifndef ANDROID        /* used on ubuntu */
 	char *tist_ko_path;
@@ -680,7 +694,8 @@ int main(int argc, char *argv[])
 	struct pollfd   p;
 	unsigned char install;
 
-        strcpy(temp_path, KIM_SYSFS_BASE);
+	char install_sysfs_entry[64];
+
 	UIM_START_FUNC();
 	err = 0;
 
@@ -694,7 +709,7 @@ int main(int argc, char *argv[])
 		UIM_ERR(" Invalid arguements");
 		UIM_ERR(" Usage: uim <bd address>");
 		return -1;
-	}	
+	}
 
 #ifndef ANDROID
 	if (uname (&name) == -1) {
@@ -703,39 +718,68 @@ int main(int argc, char *argv[])
 	}
 #else  /* if ANDROID */
 
-#ifdef MODULE
-	if (0 == lstat("/st_drv.ko", &file_stat)) {
-		if (insmod("/st_drv.ko", "") < 0) {
+	if (0 == lstat("/system/lib/modules/st_drv.ko", &file_stat)) {
+		if (insmod("/system/lib/modules/st_drv.ko", "") < 0) {
 			UIM_ERR(" Error inserting st_drv module");
 			return -1;
 		} else {
 			UIM_DBG(" Inserted st_drv module");
 		}
-	} 
+	} else {
+		if (0 == lstat(install_sysfs_entry, &file_stat)) {
+			UIM_DBG("ST built into the kernel ?");
+		} else {
+			UIM_ERR("BT/FM/GPS would be unavailable on system");
+			UIM_ERR(" rfkill device '/dev/rfkill' not found ");
+			return -1;
+		}
+	}
 
-	if (0 == lstat("/btwilink.ko", &file_stat)) {
-		if (insmod("/btwilink.ko", "") < 0) {
+	if (0 == lstat("/system/lib/modules/tty_hci.ko", &file_stat)) {
+		if (insmod("/system/lib/modules/tty_hci.ko", "") < 0) {
+			UIM_DBG("ST built into the kernel ?");
+		} else {
+			UIM_DBG(" Inserted tty_hci module");
+		}
+	} else {
+		UIM_ERR("/dev/hci_tty would be unavailable on system");
+		return -1;
+	}
+
+/* Wilink8 does not use these modules. */
+#if 0
+	if (0 == lstat("/system/lib/modules/btwilink.ko", &file_stat)) {
+		if (insmod("/system/lib/modules/btwilink.ko", "") < 0) {
 			UIM_ERR(" Error inserting btwilink module, NO BT? ");
 		} else {
 			UIM_DBG(" Inserted btwilink module");
 		}
-	} 
+	} else {
+		UIM_DBG("BT driver module un-available... ");
+		UIM_DBG("BT driver built into the kernel ?");
+	}
 
-	if (0 == lstat("/fm_drv.ko", &file_stat)) {
-		if (insmod("/fm_drv.ko", "") < 0) {
+	if (0 == lstat("/system/lib/modules/fm_drv.ko", &file_stat)) {
+		if (insmod("/system/lib/modules/fm_drv.ko", "") < 0) {
 			UIM_ERR(" Error inserting fm_drv module, NO FM? ");
 		} else {
 			UIM_DBG(" Inserted fm_drv module");
 		}
-	} 
+	} else {
+		UIM_DBG("FM driver module un-available... ");
+		UIM_DBG("FM driver built into the kernel ?");
+	}
 
-	if (0 == lstat("/gps_drv.ko", &file_stat)) {
-		if (insmod("/gps_drv.ko", "") < 0) {
+	if (0 == lstat("/system/lib/modules/gps_drv.ko", &file_stat)) {
+		if (insmod("/system/lib/modules/gps_drv.ko", "") < 0) {
 			UIM_ERR(" Error inserting gps_drv module, NO GPS? ");
 		} else {
 			UIM_DBG(" Inserted gps_drv module");
 		}
-	} 
+	} else {
+		UIM_DBG("GPS driver module un-available... ");
+		UIM_DBG("GPS driver built into the kernel ?");
+	}
 
 	if (0 == lstat("/fm_v4l2_drv.ko", &file_stat)) {
 		if (insmod("/fm_v4l2_drv.ko", "") < 0) {
@@ -743,9 +787,10 @@ int main(int argc, char *argv[])
 		} else {
 			UIM_DBG(" Inserted fm_v4l2_drv module");
 		}
-	} 
-#endif /* MODULE */
-
+	} else {
+		UIM_DBG("FM V4L2 driver module un-available... ");
+		UIM_DBG("FM V4L2 driver built into the kernel ?");
+	}
 	/* Change the permissions for v4l2 Fm device node */
 	if ((0 == lstat("/dev/radio0", &file_stat)) && chmod("/dev/radio0", 0666) < 0) {
 		UIM_ERR("unable to chmod /dev/radio0, might not exist");
@@ -753,8 +798,6 @@ int main(int argc, char *argv[])
 	if ((0 == lstat("/dev/tifm", &file_stat)) && chmod("/dev/tifm", 0666) < 0) {
 		UIM_ERR("unable to chmod /dev/tifm, might not exist");
 	}
-
-#ifndef USES_BLUEDROID
 	/* change rfkill perms after insertion of BT driver which asks
 	 * the Bluetooth sub-system to create the rfkill device of type
 	 * "bluetooth"
@@ -764,54 +807,41 @@ int main(int argc, char *argv[])
 		UIM_ERR("rfkill not enabled in st_drv - BT on from UI might fail\n");
 	}
 #endif
+
+	setuid(AID_BLUETOOTH);
 #endif /* ANDROID */
-	
-	for (kim_id = 0; kim_id < 100; kim_id++) {
-		sprintf(install_sysfs_entry, "/sys/devices/soc0/kim.%d/install", kim_id);
+
+	for (kobj_id = 0; kobj_id < 100; kobj_id++) {
+		sprintf(install_sysfs_entry, "/sys/devices/soc0/kim.%d/install", kobj_id);
 		if (0 == lstat(install_sysfs_entry, &file_stat)) {
-			sprintf(temp_path, "/sys/devices/soc0/kim.%d", kim_id);
+			sprintf(sysfs_kim_base, "/sys/devices/soc0/kim.%d", kobj_id);
+			kobj_id = 999;
 			break;
 		}
 	}
 
-	if (kim_id == 100) {		
-		UIM_ERR(" Error: can't find KIM's sysfs entry! Check if ST KIM module was initialized correctly");
+	if (kobj_id == 999) {
+		UIM_DBG("uim will use the following kim sysfs entry: %s \n", install_sysfs_entry);
+	} else {
+		UIM_ERR(" Error: can't find a valid kim sysfs entry. Check error in ti_srv module loading.");
 		return -1;
 	}
-	
-	strcpy(install_sysfs_entry, temp_path);
-	strcpy(dev_name_sysfs, temp_path);
-	strcpy(baud_rate_sysfs, temp_path);
-	strcpy(flow_cntrl_sysfs, temp_path);
 
-	strcat(install_sysfs_entry, "/install");
-	strcat(dev_name_sysfs, "/dev_name");
-	strcat(baud_rate_sysfs, "/baud_rate");
-	strcat(flow_cntrl_sysfs, "/flow_cntrl");
-
-	UIM_DBG("install = %s", install_sysfs_entry);
-	UIM_DBG("dev_name = %s", dev_name_sysfs);
-	UIM_DBG("baud_rate = %s", baud_rate_sysfs);
-	UIM_DBG("flow_cntrl = %s", flow_cntrl_sysfs);
-	
 	/* rfkill device's open/poll/read */
-	st_fd = open(INSTALL_SYSFS_ENTRY, O_RDONLY);
+	st_fd = open(install_sysfs_entry, O_RDONLY);
 	if (st_fd < 0) {
-		UIM_DBG("unable to open %s (%s)", INSTALL_SYSFS_ENTRY,
+		UIM_DBG("unable to open %s (%s)", install_sysfs_entry,
 				strerror(errno));
-#ifdef MODULE
 		remove_modules();
-#endif /* MODULE */
 		return -1;
 	}
+
 RE_POLL:
 	err = read(st_fd, &install, 1);
 	if ((err > 0) && (install == '1')) {
 		UIM_DBG("install already set");
 		st_uart_config(install);
 	}
-
-	UIM_DBG("begin polling...");
 
 	memset(&p, 0, sizeof(p));
 	p.fd = st_fd;
@@ -828,9 +858,9 @@ RE_POLL:
 	}
 
 	close(st_fd);
-	st_fd = open(INSTALL_SYSFS_ENTRY, O_RDONLY);
+	st_fd = open(install_sysfs_entry, O_RDONLY);
 	if (st_fd < 0) {
-		UIM_ERR("re-opening %s failed: %s", INSTALL_SYSFS_ENTRY,
+		UIM_ERR("re-opening %s failed: %s", install_sysfs_entry,
 		strerror(errno));
 		return -1;
 	}
@@ -839,7 +869,7 @@ RE_POLL:
 	{
 		err = read(st_fd, &install, 1);
 		if (err <= 0) {
-			UIM_ERR("reading %s failed: %s", INSTALL_SYSFS_ENTRY,
+			UIM_ERR("reading %s failed: %s", install_sysfs_entry,
 					strerror(errno));
 			goto RE_POLL;
 		}
@@ -847,14 +877,12 @@ RE_POLL:
 		goto RE_POLL;
 	}
 
-#ifdef MODULE
 	if(remove_modules() < 0) {
 		UIM_ERR(" Error removing modules ");
 		close(st_fd);
 		return -1;
 	}
 
-#endif /* MODULE */
 	close(st_fd);
 	return 0;
 }
