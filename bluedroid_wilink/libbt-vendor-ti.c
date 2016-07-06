@@ -26,13 +26,21 @@
 #include <fcntl.h>
 #include <errno.h>
 #include <bt_vendor_lib.h>
-#include <bt_hci_lib.h>
 #include <bt_hci_bdroid.h>
-#include <utils.h>
 
 bt_vendor_callbacks_t *bt_vendor_cbacks = NULL;
 unsigned int hci_tty_fd = -1;
 void hw_config_cback(HC_BT_HDR *p_evt_buf);
+
+/** Host/Controller Library Return Status */
+typedef enum {
+	BT_HC_STATUS_SUCCESS,
+	BT_HC_STATUS_FAIL,
+	BT_HC_STATUS_NOT_READY,
+	BT_HC_STATUS_NOMEM,
+	BT_HC_STATUS_BUSY,
+	BT_HC_STATUS_CORRUPTED_BUFFER
+} bt_hc_status_t;
 
 /*******************************************************************************
  *
